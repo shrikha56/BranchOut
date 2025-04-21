@@ -53,6 +53,12 @@ def init_auth(app):
         server_metadata_url='https://accounts.google.com/.well-known/openid-configuration'
     )
     
+    # Increase session cookie security and lifetime
+    app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour in seconds
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    
     # We'll print the redirect URI after all routes are registered
     
     # Google login route
@@ -88,8 +94,12 @@ def init_auth(app):
                 # Local development
                 redirect_uri = 'http://localhost:8080/authorize'
                 app.logger.info(f"Using development redirect URI: {redirect_uri}")
+            
+            # Generate and store a state parameter in the session
+            session['oauth_state'] = os.urandom(16).hex()
+            app.logger.info(f"Generated OAuth state: {session['oauth_state']}")
                 
-            return google.authorize_redirect(redirect_uri)
+            return google.authorize_redirect(redirect_uri, state=session['oauth_state'])
         except Exception as e:
             flash(f'Error initiating Google OAuth: {str(e)}', 'danger')
             return redirect(url_for('index'))
@@ -98,6 +108,12 @@ def init_auth(app):
     @app.route('/authorize')
     def authorize():
         try:
+            # Log the incoming state parameter for debugging
+            incoming_state = request.args.get('state')
+            session_state = session.get('oauth_state')
+            app.logger.info(f"Authorize callback - Incoming state: {incoming_state}, Session state: {session_state}")
+            
+            # Get the access token
             token = google.authorize_access_token()
             user_info = google.parse_id_token(token)
             

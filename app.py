@@ -30,6 +30,13 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'development-key')
 app.config['APP_NAME'] = os.environ.get('APP_NAME', 'BranchOut')
 
+# Session configuration for better security in production
+is_production = os.environ.get('FLASK_ENV') == 'production'
+app.config['SESSION_COOKIE_SECURE'] = is_production
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour in seconds
+
 db.init_app(app)
 
 # Initialize authentication
