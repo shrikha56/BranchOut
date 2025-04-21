@@ -39,11 +39,26 @@ def init_auth(app):
     # Get application name from config
     app_name = app.config.get('APP_NAME', 'BranchOut')
     
+    # Debug: Print OAuth client credentials (redacted for security)
+    client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
+    client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+    
+    if client_id:
+        masked_id = client_id[:8] + '...' + client_id[-4:] if len(client_id) > 12 else client_id
+        app.logger.info(f"Using Google client ID: {masked_id}")
+    else:
+        app.logger.error("Google client ID is missing!")
+        
+    if client_secret:
+        app.logger.info("Google client secret is configured")
+    else:
+        app.logger.error("Google client secret is missing!")
+    
     # Register Google OAuth client
     google = oauth.register(
         name='google',
-        client_id=os.environ.get('GOOGLE_CLIENT_ID', ''),
-        client_secret=os.environ.get('GOOGLE_CLIENT_SECRET', ''),
+        client_id=client_id,
+        client_secret=client_secret,
         access_token_url='https://accounts.google.com/o/oauth2/token',
         access_token_params=None,
         authorize_url='https://accounts.google.com/o/oauth2/auth',
@@ -113,9 +128,30 @@ def init_auth(app):
             session_state = session.get('oauth_state')
             app.logger.info(f"Authorize callback - Incoming state: {incoming_state}, Session state: {session_state}")
             
+            # Check for error parameter from Google
+            if request.args.get('error'):
+                error = request.args.get('error')
+                error_description = request.args.get('error_description', 'No description provided')
+                app.logger.error(f"Google OAuth error: {error} - {error_description}")
+                flash(f"Google OAuth error: {error} - {error_description}", 'danger')
+                return redirect(url_for('index'))
+            
             # Get the access token
-            token = google.authorize_access_token()
-            user_info = google.parse_id_token(token)
+            try:
+                token = google.authorize_access_token()
+                app.logger.info("Successfully obtained access token")
+            except Exception as e:
+                app.logger.error(f"Error getting access token: {str(e)}")
+                flash(f"Error getting access token: {str(e)}", 'danger')
+                return redirect(url_for('index'))
+                
+            try:
+                user_info = google.parse_id_token(token)
+                app.logger.info(f"Successfully parsed ID token for user: {user_info.get('email')}")
+            except Exception as e:
+                app.logger.error(f"Error parsing ID token: {str(e)}")
+                flash(f"Error parsing ID token: {str(e)}", 'danger')
+                return redirect(url_for('index'))
             
             # Check if user exists
             student = Student.query.filter_by(google_id=user_info['sub']).first()
