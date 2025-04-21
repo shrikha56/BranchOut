@@ -79,10 +79,6 @@ def init_auth(app):
     # Google login route
     @app.route('/login')
     def login():
-        # For demonstration, also provide a mock login option
-        if request.args.get('mock'):
-            return render_template('mock_login.html')
-        
         # Check if Google credentials are configured
         client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
         client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
@@ -202,49 +198,7 @@ def init_auth(app):
                 
             return redirect(url_for('index'))
     
-    # Mock login for testing
-    @app.route('/login/mock', methods=['POST'])
-    def mock_login():
-        email = request.form.get('email')
-        name = request.form.get('name', 'New Student')
-        
-        if not email:
-            flash('Email is required', 'danger')
-            return redirect(url_for('login', mock=True))
-        
-        # Check if user exists
-        student = Student.query.filter_by(email=email).first()
-        
-        if student:
-            # Existing user - log them in
-            login_user(User(student))
-            
-            # Check if it's their first login
-            if student.first_login:
-                student.first_login = False
-                db.session.commit()
-                return redirect(url_for('submit', student_id=student.id))
-            else:
-                return redirect(url_for('directory', student_id=student.id))
-        else:
-            # New user - create a placeholder student record
-            new_student = Student(
-                name=name,
-                year=1,  # Default value, will be updated in the form
-                faculty='',  # Will be updated in the form
-                google_id=email,  # Use email as google_id for mock
-                email=email,
-                profile_picture='/static/img/default-profile.jpg',
-                first_login=True
-            )
-            db.session.add(new_student)
-            db.session.commit()
-            
-            # Log in the new user
-            login_user(User(new_student))
-            
-            # Redirect to the registration form
-            return redirect(url_for('submit', student_id=new_student.id))
+    # Mock login functionality has been removed
     
     @app.route('/logout')
     def logout():
