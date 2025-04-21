@@ -76,16 +76,16 @@ def init_auth(app):
             
         # Redirect to Google OAuth
         try:
-            # Get the deployment environment from environment variable
-            is_vercel = os.environ.get('VERCEL', '0') == '1'
+            # Get the deployment environment
+            is_production = os.environ.get('FLASK_ENV') == 'production'
             
-            if is_vercel:
-                # Use Vercel deployment URL
-                vercel_url = os.environ.get('VERCEL_URL', '')
-                if vercel_url:
-                    redirect_uri = f'https://{vercel_url}/authorize'
+            if is_production:
+                # Use the configured production URL
+                app_url = os.environ.get('APP_URL', '')
+                if app_url:
+                    redirect_uri = f'{app_url}/authorize'
                 else:
-                    # Fallback to configured URL
+                    # Fallback to configured URI
                     redirect_uri = os.environ.get('OAUTH_REDIRECT_URI', 'http://localhost:8080/authorize')
             else:
                 # Local development

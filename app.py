@@ -12,15 +12,23 @@ load_dotenv()
 from auth import init_auth
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///student_directory.db'
+# Configure database based on environment
+database_url = os.environ.get('DATABASE_URL')
+if database_url and database_url.startswith('postgres://'):
+    # Render uses PostgreSQL
+    # Fix for SQLAlchemy 1.4+ which requires postgresql:// instead of postgres://
+    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    # Local development uses SQLite
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///student_directory.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.path.join(app.static_folder, 'uploads')
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif'}
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'development-key')
 app.config['APP_NAME'] = os.environ.get('APP_NAME', 'BranchOut')
-# Using SERVER_NAME can cause routing issues in development
-# app.config['PREFERRED_URL_SCHEME'] = 'http'
 
 db.init_app(app)
 
