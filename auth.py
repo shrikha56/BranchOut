@@ -1,8 +1,8 @@
 from flask import Flask, redirect, url_for, session, request, jsonify, flash, render_template
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
-from authlib.integrations.flask_client import OAuth
 from models.models import db, Student
 import os
+import requests
 
 # Initialize login manager
 login_manager = LoginManager()
@@ -33,44 +33,36 @@ def init_auth(app):
     if not app.secret_key:
         app.secret_key = os.environ.get('SECRET_KEY', 'development-key')
     
-    # Initialize OAuth
-    oauth = OAuth(app)
-    
     # Get application name from config
     app_name = app.config.get('APP_NAME', 'BranchOut')
     
-    # Debug: Print OAuth client credentials (redacted for security)
+    # Google OAuth credentials
     client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
     client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
     
+    # Print detailed debug information
     if client_id:
-        masked_id = client_id[:8] + '...' + client_id[-4:] if len(client_id) > 12 else client_id
-        app.logger.info(f"Using Google client ID: {masked_id}")
+        app.logger.info(f"Client ID length: {len(client_id)} characters")
+        app.logger.info(f"Client ID first 8 chars: {client_id[:8]}")
+        app.logger.info(f"Client ID last 4 chars: {client_id[-4:]}")
     else:
-        app.logger.error("Google client ID is missing!")
+        app.logger.error("GOOGLE_CLIENT_ID environment variable is not set")
         
     if client_secret:
-        app.logger.info("Google client secret is configured")
+        app.logger.info(f"Client secret length: {len(client_secret)} characters")
+        app.logger.info(f"Client secret first 8 chars: {client_secret[:8]}")
     else:
-        app.logger.error("Google client secret is missing!")
+        app.logger.error("GOOGLE_CLIENT_SECRET environment variable is not set")
     
-    # Register Google OAuth client
-    google = oauth.register(
-        name='google',
-        client_id=client_id,
-        client_secret=client_secret,
-        access_token_url='https://accounts.google.com/o/oauth2/token',
-        access_token_params=None,
-        authorize_url='https://accounts.google.com/o/oauth2/auth',
-        authorize_params=None,
-        api_base_url='https://www.googleapis.com/oauth2/v1/',
-        client_kwargs={'scope': 'openid email profile'},
-        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration'
-    )
+    # Google OAuth endpoints
+    AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+    TOKEN_URL = "https://oauth2.googleapis.com/token"
+    USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
     
     # Increase session cookie security and lifetime
     app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
     app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour in seconds
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     
@@ -109,8 +101,26 @@ def init_auth(app):
             # Generate and store a state parameter in the session
             session['oauth_state'] = os.urandom(16).hex()
             app.logger.info(f"Generated OAuth state: {session['oauth_state']}")
-                
-            return google.authorize_redirect(redirect_uri, state=session['oauth_state'])
+            
+            # Direct OAuth implementation using requests
+            scope = "openid email profile"
+            auth_url = "https://accounts.google.com/o/oauth2/v2/auth"
+            
+            auth_params = {
+                "response_type": "code",
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "scope": scope,
+                "state": session['oauth_state'],
+                "access_type": "offline",
+                "prompt": "consent"
+            }
+            
+            # Build the authorization URL
+            auth_url_with_params = f"{auth_url}?" + "&".join([f"{k}={v}" for k, v in auth_params.items()])
+            app.logger.info(f"Redirecting to OAuth URL: {auth_url_with_params}")
+            
+            return redirect(auth_url_with_params)
         except Exception as e:
             flash(f'Error initiating Google OAuth: {str(e)}', 'danger')
             return redirect(url_for('index'))
@@ -132,25 +142,83 @@ def init_auth(app):
                 flash(f"Google OAuth error: {error} - {error_description}", 'danger')
                 return redirect(url_for('index'))
             
-            # Get the access token
-            try:
-                token = google.authorize_access_token()
-                app.logger.info("Successfully obtained access token")
-            except Exception as e:
-                app.logger.error(f"Error getting access token: {str(e)}")
-                flash(f"Error getting access token: {str(e)}", 'danger')
-                return redirect(url_for('index'))
-                
-            try:
-                user_info = google.parse_id_token(token)
-                app.logger.info(f"Successfully parsed ID token for user: {user_info.get('email')}")
-            except Exception as e:
-                app.logger.error(f"Error parsing ID token: {str(e)}")
-                flash(f"Error parsing ID token: {str(e)}", 'danger')
+            # Verify state parameter to prevent CSRF
+            if incoming_state != session_state:
+                app.logger.error(f"State mismatch: {incoming_state} vs {session_state}")
+                flash("Invalid state parameter. Try logging in again.", 'danger')
                 return redirect(url_for('index'))
             
-            # Check if user exists
-            student = Student.query.filter_by(google_id=user_info['sub']).first()
+            # Get the authorization code
+            code = request.args.get('code')
+            if not code:
+                app.logger.error("No authorization code received")
+                flash("No authorization code received", 'danger')
+                return redirect(url_for('index'))
+                
+            # Exchange code for tokens
+            client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
+            client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+            
+            # Get the redirect URI
+            is_production = os.environ.get('FLASK_ENV') == 'production'
+            if is_production:
+                app_url = os.environ.get('APP_URL', 'https://branchout.onrender.com')
+                redirect_uri = f'{app_url}/authorize'
+            else:
+                redirect_uri = 'http://localhost:8080/authorize'
+            
+            token_url = "https://oauth2.googleapis.com/token"
+            data = {
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code"
+            }
+            
+            app.logger.info(f"Exchanging code for token with data: {data}")
+            
+            try:
+                token_res = requests.post(token_url, data=data)
+                app.logger.info(f"Token response status: {token_res.status_code}")
+                
+                if token_res.status_code != 200:
+                    app.logger.error(f"Error getting token: {token_res.text}")
+                    flash(f"Error getting token: {token_res.text}", 'danger')
+                    return redirect(url_for('index'))
+                    
+                tokens = token_res.json()
+                access_token = tokens.get("access_token")
+                app.logger.info("Successfully obtained access token")
+                
+                # Get user info
+                userinfo_url = "https://www.googleapis.com/oauth2/v3/userinfo"
+                headers = {"Authorization": f"Bearer {access_token}"}
+                
+                userinfo_res = requests.get(userinfo_url, headers=headers)
+                if userinfo_res.status_code != 200:
+                    app.logger.error(f"Failed to fetch user info: {userinfo_res.text}")
+                    flash("Failed to fetch user info", 'danger')
+                    return redirect(url_for('index'))
+                    
+                user_info = userinfo_res.json()
+                app.logger.info(f"Successfully fetched user info for: {user_info.get('email')}")
+                
+            except Exception as e:
+                app.logger.error(f"Error in token exchange: {str(e)}")
+                flash(f"Error in token exchange: {str(e)}", 'danger')
+                return redirect(url_for('index'))
+            
+            # Check if user exists - note that the user ID field is 'sub' in the response
+            google_id = user_info.get('sub')
+            if not google_id:
+                app.logger.error("No sub/user ID found in user info response")
+                app.logger.info(f"User info keys: {user_info.keys()}")
+                # Try alternate field names
+                google_id = user_info.get('id') or user_info.get('user_id')
+                
+            app.logger.info(f"Looking up student with google_id: {google_id}")
+            student = Student.query.filter_by(google_id=google_id).first()
             
             if student:
                 # Existing user - log them in
@@ -169,7 +237,7 @@ def init_auth(app):
                     name=user_info.get('name', 'New Student'),
                     year=1,  # Default value, will be updated in the form
                     faculty='',  # Will be updated in the form
-                    google_id=user_info['sub'],
+                    google_id=google_id,
                     email=user_info.get('email'),
                     profile_picture=user_info.get('picture', '/static/img/default-profile.jpg'),
                     first_login=True
