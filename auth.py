@@ -167,19 +167,19 @@ def init_auth(app):
             else:
                 redirect_uri = 'http://localhost:8080/authorize'
             
-            token_url = "https://oauth2.googleapis.com/token"
-            data = {
-                "code": code,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code"
-            }
-            
-            app.logger.info(f"Exchanging code for token with data: {data}")
-            
             try:
-                token_res = requests.post(token_url, data=data)
+                app.logger.info(f"Exchanging code for token with redirect_uri: {redirect_uri}")
+                
+                token_res = requests.post(
+                    "https://oauth2.googleapis.com/token",
+                    data={
+                        "code": code,
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "redirect_uri": redirect_uri,
+                        "grant_type": "authorization_code"
+                    }
+                )
                 app.logger.info(f"Token response status: {token_res.status_code}")
                 
                 if token_res.status_code != 200:
