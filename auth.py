@@ -81,15 +81,13 @@ def init_auth(app):
             
             if is_production:
                 # Use the configured production URL
-                app_url = os.environ.get('APP_URL', '')
-                if app_url:
-                    redirect_uri = f'{app_url}/authorize'
-                else:
-                    # Fallback to configured URI
-                    redirect_uri = os.environ.get('OAUTH_REDIRECT_URI', 'http://localhost:8080/authorize')
+                app_url = os.environ.get('APP_URL', 'https://branchout.onrender.com')
+                redirect_uri = f'{app_url}/authorize'
+                app.logger.info(f"Using production redirect URI: {redirect_uri}")
             else:
                 # Local development
                 redirect_uri = 'http://localhost:8080/authorize'
+                app.logger.info(f"Using development redirect URI: {redirect_uri}")
                 
             return google.authorize_redirect(redirect_uri)
         except Exception as e:
@@ -204,4 +202,12 @@ def init_auth(app):
         return redirect(url_for('index'))
         
     # Print the redirect URI for debugging
-    print(f"\nGoogle OAuth Redirect URI: http://localhost:8080/authorize\n")
+    with app.test_request_context():
+        is_production = os.environ.get('FLASK_ENV') == 'production'
+        app_url = os.environ.get('APP_URL', '')
+        
+        if is_production and app_url:
+            redirect_uri = f"{app_url}/authorize"
+            print(f"\nGoogle OAuth Redirect URI (Production): {redirect_uri}\n")
+        else:
+            print(f"\nGoogle OAuth Redirect URI (Development): http://localhost:8080/authorize\n")
