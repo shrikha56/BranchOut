@@ -1,6 +1,5 @@
 from flask import Flask, redirect, url_for, session, request, jsonify, flash, render_template
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
-from authlib.integrations.flask_client import OAuth
 from models.models import db, Student
 import os
 
@@ -32,41 +31,10 @@ def init_auth(app):
     # Set secret key for session
     if not app.secret_key:
         app.secret_key = os.environ.get('SECRET_KEY', 'development-key')
-    
-    # Initialize OAuth
-    oauth = OAuth(app)
+        print("aaaaaaahelp" + app.secret_key)
     
     # Get application name from config
     app_name = app.config.get('APP_NAME', 'BranchOut')
-    
-    # Debug: Print OAuth client credentials (redacted for security)
-    client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
-    client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
-    
-    if client_id:
-        masked_id = client_id[:8] + '...' + client_id[-4:] if len(client_id) > 12 else client_id
-        app.logger.info(f"Using Google client ID: {masked_id}")
-    else:
-        app.logger.error("Google client ID is missing!")
-        
-    if client_secret:
-        app.logger.info("Google client secret is configured")
-    else:
-        app.logger.error("Google client secret is missing!")
-    
-    # Register Google OAuth client
-    google = oauth.register(
-        name='google',
-        client_id=client_id,
-        client_secret=client_secret,
-        access_token_url='https://accounts.google.com/o/oauth2/token',
-        access_token_params=None,
-        authorize_url='https://accounts.google.com/o/oauth2/auth',
-        authorize_params=None,
-        api_base_url='https://www.googleapis.com/oauth2/v1/',
-        client_kwargs={'scope': 'openid email profile'},
-        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration'
-    )
     
     # Increase session cookie security and lifetime
     app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
@@ -76,81 +44,23 @@ def init_auth(app):
     
     # We'll print the redirect URI after all routes are registered
     
-    # Google login route
-    @app.route('/login')
+    # Login route
+    @app.route('/login', methods=['GET', 'POST'])
     def login():
-        # Check if Google credentials are configured
-        client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
-        client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+        if request.method == 'GET':
+            return render_template('login.html')
         
-        if not client_id or client_id == 'your-google-client-id':
-            flash('Google Client ID is missing or invalid. Please check your .env file.', 'danger')
-            return redirect(url_for('index'))
+        # Process login form
+        if request.method == 'POST':
+            email = request.form.get('email')
+            name = request.form.get('name', 'New Student')
             
-        if not client_secret or client_secret == 'your-google-client-secret':
-            flash('Google Client Secret is missing or invalid. Please check your .env file.', 'danger')
-            return redirect(url_for('index'))
-            
-        # Redirect to Google OAuth
-        try:
-            # Get the deployment environment
-            is_production = os.environ.get('FLASK_ENV') == 'production'
-            
-            if is_production:
-                # Use the configured production URL
-                app_url = os.environ.get('APP_URL', 'https://branchout.onrender.com')
-                redirect_uri = f'{app_url}/authorize'
-                app.logger.info(f"Using production redirect URI: {redirect_uri}")
-            else:
-                # Local development
-                redirect_uri = 'http://localhost:8080/authorize'
-                app.logger.info(f"Using development redirect URI: {redirect_uri}")
-            
-            # Generate and store a state parameter in the session
-            session['oauth_state'] = os.urandom(16).hex()
-            app.logger.info(f"Generated OAuth state: {session['oauth_state']}")
-                
-            return google.authorize_redirect(redirect_uri, state=session['oauth_state'])
-        except Exception as e:
-            flash(f'Error initiating Google OAuth: {str(e)}', 'danger')
-            return redirect(url_for('index'))
-    
-    # Google OAuth callback
-    @app.route('/authorize')
-    def authorize():
-        try:
-            # Log the incoming state parameter for debugging
-            incoming_state = request.args.get('state')
-            session_state = session.get('oauth_state')
-            app.logger.info(f"Authorize callback - Incoming state: {incoming_state}, Session state: {session_state}")
-            
-            # Check for error parameter from Google
-            if request.args.get('error'):
-                error = request.args.get('error')
-                error_description = request.args.get('error_description', 'No description provided')
-                app.logger.error(f"Google OAuth error: {error} - {error_description}")
-                flash(f"Google OAuth error: {error} - {error_description}", 'danger')
-                return redirect(url_for('index'))
-            
-            # Get the access token
-            try:
-                token = google.authorize_access_token()
-                app.logger.info("Successfully obtained access token")
-            except Exception as e:
-                app.logger.error(f"Error getting access token: {str(e)}")
-                flash(f"Error getting access token: {str(e)}", 'danger')
-                return redirect(url_for('index'))
-                
-            try:
-                user_info = google.parse_id_token(token)
-                app.logger.info(f"Successfully parsed ID token for user: {user_info.get('email')}")
-            except Exception as e:
-                app.logger.error(f"Error parsing ID token: {str(e)}")
-                flash(f"Error parsing ID token: {str(e)}", 'danger')
-                return redirect(url_for('index'))
+            if not email:
+                flash('Email is required', 'danger')
+                return redirect(url_for('login'))
             
             # Check if user exists
-            student = Student.query.filter_by(google_id=user_info['sub']).first()
+            student = Student.query.filter_by(email=email).first()
             
             if student:
                 # Existing user - log them in
@@ -166,12 +76,11 @@ def init_auth(app):
             else:
                 # New user - create a placeholder student record
                 new_student = Student(
-                    name=user_info.get('name', 'New Student'),
+                    name=name,
                     year=1,  # Default value, will be updated in the form
                     faculty='',  # Will be updated in the form
-                    google_id=user_info['sub'],
-                    email=user_info.get('email'),
-                    profile_picture=user_info.get('picture', '/static/img/default-profile.jpg'),
+                    email=email,
+                    profile_picture='/static/img/default-profile.jpg',
                     first_login=True
                 )
                 db.session.add(new_student)
@@ -182,21 +91,6 @@ def init_auth(app):
                 
                 # Redirect to the registration form
                 return redirect(url_for('submit', student_id=new_student.id))
-        except Exception as e:
-            # Provide detailed error information
-            error_message = str(e)
-            app.logger.error(f"OAuth Error: {error_message}")
-            
-            if 'invalid_client' in error_message:
-                flash('Google OAuth client error: Your client ID or client secret may be incorrect or not authorized.', 'danger')
-                flash('Make sure you have: 1) Added the correct client secret to .env file, 2) Configured the OAuth consent screen, 3) Added your email as a test user', 'warning')
-            elif 'redirect_uri_mismatch' in error_message:
-                flash('Redirect URI mismatch: The redirect URI in your Google Console does not match the application URI.', 'danger')
-                flash(f'Please add this exact URI to your Google Console: {url_for("authorize", _external=True)}', 'warning')
-            else:
-                flash(f'Google authentication error: {error_message}', 'danger')
-                
-            return redirect(url_for('index'))
     
     # Mock login functionality has been removed
     
@@ -207,13 +101,5 @@ def init_auth(app):
         flash('You have been logged out', 'info')
         return redirect(url_for('index'))
         
-    # Print the redirect URI for debugging
-    with app.test_request_context():
-        is_production = os.environ.get('FLASK_ENV') == 'production'
-        app_url = os.environ.get('APP_URL', '')
-        
-        if is_production and app_url:
-            redirect_uri = f"{app_url}/authorize"
-            print(f"\nGoogle OAuth Redirect URI (Production): {redirect_uri}\n")
-        else:
-            print(f"\nGoogle OAuth Redirect URI (Development): http://localhost:8080/authorize\n")
+    # Print authentication initialization message
+    print(f"\nInitialized simple email authentication for {app_name}\n")

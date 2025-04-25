@@ -137,35 +137,44 @@ def submit():
     student.profile_picture = profile_picture_path
     student.first_login = False  # Mark as not first login anymore
     
-    # Add interests
-    for interest_name in interests:
-        interest = Interest.query.filter_by(name=interest_name).first()
-        if not interest:
-            interest = Interest(name=interest_name)
-            db.session.add(interest)
-            db.session.flush()
-        student_interest = StudentInterest(student_id=student.id, interest_id=interest.id)
-        db.session.add(student_interest)
-    
-    # Add clubs
-    for club_name in clubs:
-        club = Club.query.filter_by(name=club_name).first()
-        if not club:
-            club = Club(name=club_name)
-            db.session.add(club)
-            db.session.flush()
-        student_club = StudentClub(student_id=student.id, club_id=club.id)
-        db.session.add(student_club)
-    
-    # Add languages
-    for language_name in languages:
-        language = Language.query.filter_by(name=language_name).first()
-        if not language:
-            language = Language(name=language_name)
-            db.session.add(language)
-            db.session.flush()
-        student_language = StudentLanguage(student_id=student.id, language_id=language.id)
-        db.session.add(student_language)
+    from sqlalchemy.orm import Session
+    with db.session.no_autoflush:
+        # Remove existing interests
+        StudentInterest.query.filter_by(student_id=student.id).delete()
+        db.session.flush()
+        # Add interests
+        for interest_name in interests:
+            interest = Interest.query.filter_by(name=interest_name).first()
+            if not interest:
+                interest = Interest(name=interest_name)
+                db.session.add(interest)
+                db.session.flush()
+            student_interest = StudentInterest(student_id=student.id, interest_id=interest.id)
+            db.session.add(student_interest)
+        # Remove existing clubs
+        StudentClub.query.filter_by(student_id=student.id).delete()
+        db.session.flush()
+        # Add clubs
+        for club_name in clubs:
+            club = Club.query.filter_by(name=club_name).first()
+            if not club:
+                club = Club(name=club_name)
+                db.session.add(club)
+                db.session.flush()
+            student_club = StudentClub(student_id=student.id, club_id=club.id)
+            db.session.add(student_club)
+        # Remove existing languages
+        StudentLanguage.query.filter_by(student_id=student.id).delete()
+        db.session.flush()
+        # Add languages
+        for language_name in languages:
+            language = Language.query.filter_by(name=language_name).first()
+            if not language:
+                language = Language(name=language_name)
+                db.session.add(language)
+                db.session.flush()
+            student_language = StudentLanguage(student_id=student.id, language_id=language.id)
+            db.session.add(student_language)
     
     # Commit all changes
     db.session.commit()

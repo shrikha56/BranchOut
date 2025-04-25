@@ -28,8 +28,7 @@ class Student(db.Model):
     faculty = db.Column(db.String(100), nullable=False)
     profile_picture = db.Column(db.String(255), nullable=False, default='/static/img/default-profile.jpg')
     
-    # Google Auth fields
-    google_id = db.Column(db.String(100), unique=True, nullable=True)
+    # Authentication fields
     email = db.Column(db.String(100), unique=True, nullable=True)
     first_login = db.Column(db.Boolean, default=True)
     
