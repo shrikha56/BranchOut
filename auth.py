@@ -2,6 +2,8 @@ from flask import Flask, redirect, url_for, session, request, jsonify, flash, re
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
 from models.models import db, Student
 import os
+from authlib.integrations.flask_client import OAuth
+from werkzeug.exceptions import HTTPException
 
 # Initialize login manager
 login_manager = LoginManager()
@@ -31,7 +33,6 @@ def init_auth(app):
     # Set secret key for session
     if not app.secret_key:
         app.secret_key = os.environ.get('SECRET_KEY', 'development-key')
-        print("aaaaaaahelp" + app.secret_key)
     
     # Get application name from config
     app_name = app.config.get('APP_NAME', 'BranchOut')
@@ -41,65 +42,83 @@ def init_auth(app):
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['PERMANENT_SESSION_LIFETIME'] = 3600  # 1 hour in seconds
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-    
-    # We'll print the redirect URI after all routes are registered
-    
+
+    # OAuth setup
+    oauth = OAuth(app)
+    oauth.register(
+        name='google',
+        client_id=os.environ.get('GOOGLE_CLIENT_ID'),
+        client_secret=os.environ.get('GOOGLE_CLIENT_SECRET'),
+        access_token_url='https://oauth2.googleapis.com/token',
+        access_token_params=None,
+        authorize_url='https://accounts.google.com/o/oauth2/auth',
+        authorize_params=None,
+        api_base_url='https://www.googleapis.com/oauth2/v2/',
+        userinfo_endpoint='https://openidconnect.googleapis.com/v1/userinfo',
+        client_kwargs={'scope': 'openid email profile'},
+    )
+
     # Login route
     @app.route('/login', methods=['GET', 'POST'])
     def login():
         if request.method == 'GET':
             return render_template('login.html')
-        
-        # Process login form
-        if request.method == 'POST':
-            email = request.form.get('email')
-            name = request.form.get('name', 'New Student')
-            
-            if not email:
-                flash('Email is required', 'danger')
-                return redirect(url_for('login'))
-            
-            # Check if user exists
-            student = Student.query.filter_by(email=email).first()
-            
-            if student:
-                # Existing user - log them in
-                login_user(User(student))
-                
-                # Check if it's their first login
-                if student.first_login:
-                    student.first_login = False
-                    db.session.commit()
-                    return redirect(url_for('submit', student_id=student.id))
-                else:
-                    return redirect(url_for('directory', student_id=student.id))
-            else:
-                # New user - create a placeholder student record
-                new_student = Student(
-                    name=name,
-                    year=1,  # Default value, will be updated in the form
-                    faculty='',  # Will be updated in the form
-                    email=email,
-                    profile_picture='/static/img/default-profile.jpg',
-                    first_login=True
-                )
-                db.session.add(new_student)
+        # Email/password login is deprecated, redirect to Google login
+        return redirect(url_for('google_login'))
+
+    @app.route('/login/google')
+    def google_login():
+        redirect_uri = url_for('google_authorize', _external=True)
+        return oauth.google.authorize_redirect(redirect_uri)
+
+    @app.route('/authorize')
+    def google_authorize():
+        try:
+            token = oauth.google.authorize_access_token()
+            user_info = oauth.google.parse_id_token(token)
+        except HTTPException as e:
+            flash('Google authentication failed.', 'danger')
+            return redirect(url_for('login'))
+        except Exception as e:
+            flash('An error occurred during authentication.', 'danger')
+            return redirect(url_for('login'))
+
+        email = user_info.get('email')
+        name = user_info.get('name', 'New Student')
+        picture = user_info.get('picture', '/static/img/default-profile.jpg')
+        if not email:
+            flash('Google account did not return an email.', 'danger')
+            return redirect(url_for('login'))
+
+        student = Student.query.filter_by(email=email).first()
+        if student:
+            login_user(User(student))
+            if student.first_login:
+                student.first_login = False
                 db.session.commit()
-                
-                # Log in the new user
-                login_user(User(new_student))
-                
-                # Redirect to the registration form
-                return redirect(url_for('submit', student_id=new_student.id))
-    
-    # Mock login functionality has been removed
-    
+                return redirect(url_for('submit', student_id=student.id))
+            else:
+                return redirect(url_for('directory', student_id=student.id))
+        else:
+            new_student = Student(
+                name=name,
+                year=1,
+                faculty='',
+                email=email,
+                profile_picture=picture,
+                first_login=True
+            )
+            db.session.add(new_student)
+            db.session.commit()
+            login_user(User(new_student))
+            return redirect(url_for('submit', student_id=new_student.id))
+
     @app.route('/logout')
     def logout():
         session.clear()
         logout_user()
         flash('You have been logged out', 'info')
         return redirect(url_for('index'))
-        
+
     # Print authentication initialization message
-    print(f"\nInitialized simple email authentication for {app_name}\n")
+    print(f"\nInitialized Google OAuth authentication for {app_name}\n")
