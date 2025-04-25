@@ -40,7 +40,11 @@ def init_auth(app):
     # Google OAuth credentials
     client_id = os.environ.get('GOOGLE_CLIENT_ID', '')
     client_secret = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+    app.logger.info(f"Client ID aaaaaaaaa: {client_id}")
+    app.logger.info(f"Client secret aaaaaaaaa: {client_secret}")
     
+
+
     # Print detailed debug information
     if client_id:
         app.logger.info(f"Client ID length: {len(client_id)} characters")
